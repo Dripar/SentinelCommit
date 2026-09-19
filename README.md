@@ -107,6 +107,9 @@ asserts a hazard.
 
 ## Screenshots
 
+Verbatim terminal output from a real run — including the two bugs this testing
+actually caught — is in [`docs/DEMO.md`](docs/DEMO.md).
+
 ### 1. Commit blocked — transactional hazard detected
 
 *Committing a balance debit that is made durable before the payment gateway
