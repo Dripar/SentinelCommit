@@ -160,22 +160,34 @@ mentioning if a judge asks how it was tested.
 
 ---
 
-## Capturing the screenshots
+## Images
 
-1. Set a real key so the banner shows a live verdict rather than the mock one:
+The README embeds `images/commit-blocked.svg` and `images/commit-passed.svg`,
+which are generated from the transcript above by
+[`render_demo_svg.py`](render_demo_svg.py):
+
+```bash
+python docs/render_demo_svg.py
+```
+
+SVG rather than PNG on purpose: it stays sharp at any zoom, renders inline on
+GitHub, and shows up as a readable diff in review instead of an opaque binary
+blob. Edit the `BLOCKED` / `PASSED` line lists in the generator and re-run to
+update them.
+
+### If you want real photographic screenshots instead
+
+The rendered images reproduce output captured with `SENTINEL_MOCK=1`. To
+capture a genuine live-API run:
+
+1. Set a real key so the verdict comes from the model, not the cache:
    ```bash
    export ANTHROPIC_API_KEY="sk-ant-..."
    unset SENTINEL_MOCK
    ```
-2. Raise the terminal font to 18pt or more — projectors and judging laptops
-   flatten anything smaller.
-3. Run Scenario A, capture the red banner in full, save as
-   `docs/images/screenshot-blocked.png`.
-4. Run Scenario B, capture the green pass line plus the resulting commit, save
-   as `docs/images/screenshot-passed.png`.
-5. Replace the `<!-- SCREENSHOT_1 -->` and `<!-- SCREENSHOT_2 -->` markers in
-   the main [README](../README.md) with:
-   ```markdown
-   ![Commit blocked](docs/images/screenshot-blocked.png)
-   ![Commit passed](docs/images/screenshot-passed.png)
-   ```
+2. Raise the terminal font to 18pt or more — projectors flatten anything
+   smaller.
+3. Run Scenario A, capture the red banner in full; run Scenario B, capture the
+   green pass line and the resulting commit.
+4. Save them under `images/` and point the two `![...]` lines in the main
+   [README](../README.md) at your files instead of the generated SVGs.

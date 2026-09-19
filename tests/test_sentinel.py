@@ -105,6 +105,82 @@ class TestMockVerdict(unittest.TestCase):
             )
 
 
+class TestMockClassifiesEveryExample(unittest.TestCase):
+    """
+    Each examples/*_unsafe.py must map to its own hazard class, and each
+    *_safe.py must clear. This caught a real ordering bug: `event_id` is a
+    parameter in the race-condition example, so it matched the idempotency
+    rule first and reported the wrong hazard.
+    """
+
+    EXAMPLES = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples")
+
+    CASES = [
+        ("transaction_fault", "TRANSACTION_FAULT"),
+        ("idempotency", "IDEMPOTENCY_RISK"),
+        ("race_condition", "RACE_CONDITION"),
+    ]
+
+    def _diff_for(self, name):
+        path = os.path.join(self.EXAMPLES, name + ".py")
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+        header = "+++ b/examples/" + name + ".py\n"
+        return header + "\n".join("+" + l for l in body.splitlines())
+
+    def test_unsafe_examples_block_with_the_right_hazard(self):
+        for stem, hazard in self.CASES:
+            with self.subTest(example=stem):
+                verdict = sentinel.mock_verdict(self._diff_for(stem + "_unsafe"))
+                self.assertTrue(verdict["should_block"])
+                self.assertEqual(verdict["hazard_type"], hazard)
+                self.assertTrue(verdict["suggested_fix"].strip())
+
+    def test_safe_examples_clear(self):
+        for stem, _ in self.CASES:
+            with self.subTest(example=stem):
+                verdict = sentinel.mock_verdict(self._diff_for(stem + "_safe"))
+                self.assertFalse(verdict["should_block"])
+                self.assertEqual(verdict["hazard_type"], "NONE")
+
+    def test_blocked_verdicts_name_the_file(self):
+        verdict = sentinel.mock_verdict(self._diff_for("transaction_fault_unsafe"))
+        self.assertEqual(verdict["file"], "examples/transaction_fault_unsafe.py")
+
+    def test_fallback_rule_has_no_signals(self):
+        # The last rule must match unconditionally, or some diffs get no verdict.
+        self.assertEqual(sentinel.MOCK_RULES[-1][2], ())
+        self.assertEqual(sentinel.MOCK_RULES[-1][0], "TRANSACTION_FAULT")
+
+    def test_every_rule_has_a_clear_reason(self):
+        for rule in sentinel.MOCK_RULES:
+            self.assertIn(rule[0], sentinel.CLEAR_REASON)
+
+
+class TestAuditLog(unittest.TestCase):
+    def test_logging_can_be_disabled(self):
+        os.environ["SENTINEL_AUDIT_LOG"] = "off"
+        try:
+            self.assertIsNone(sentinel.audit_log_path())
+        finally:
+            del os.environ["SENTINEL_AUDIT_LOG"]
+
+    def test_explicit_path_is_honoured(self):
+        os.environ["SENTINEL_AUDIT_LOG"] = "/tmp/custom-audit.jsonl"
+        try:
+            self.assertEqual(sentinel.audit_log_path(), "/tmp/custom-audit.jsonl")
+        finally:
+            del os.environ["SENTINEL_AUDIT_LOG"]
+
+    def test_record_never_raises_on_an_unwritable_path(self):
+        os.environ["SENTINEL_AUDIT_LOG"] = "/nonexistent-dir/nope/audit.jsonl"
+        try:
+            sentinel.record("passed", files=["a.py"])  # must not raise
+        finally:
+            del os.environ["SENTINEL_AUDIT_LOG"]
+
+
 class TestTextWrapping(unittest.TestCase):
     def test_never_returns_empty_list(self):
         self.assertEqual(sentinel._wrap("", 40), [""])
