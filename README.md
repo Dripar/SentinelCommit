@@ -105,23 +105,64 @@ asserts a hazard.
 
 ---
 
-## Screenshots
+## See it work
 
-Verbatim terminal output from a real run — including the two bugs this testing
-actually caught — is in [`docs/DEMO.md`](docs/DEMO.md).
+The same function, committed twice. The only difference is whether the durable
+write and the network call share an atomic outcome.
 
-### 1. Commit blocked — transactional hazard detected
+### With the bug — the commit is refused
 
-*Committing a balance debit that is made durable before the payment gateway
-call:*
+The balance is debited and **committed**, and only then is the payment gateway
+called. Nothing reverses the debit if that call fails:
 
-<!-- SCREENSHOT_1 -->
+```python
+def process_order(db, payment_gateway, user_id, amount):
+    db.execute(
+        "UPDATE users SET balance = balance - %s WHERE id = %s",
+        (amount, user_id),
+    )
+    db.commit()                                   # durable, and irreversible
 
-### 2. Commit passed — remediated code accepted
+    payment_gateway.charge(user_id, amount)       # if this raises, money is gone
+```
 
-*After applying the suggested patch with explicit transaction boundaries:*
+`ruff`, `flake8`, `mypy` and `pylint` all pass this file. SentinelCommit does
+not:
 
-<!-- SCREENSHOT_2 -->
+![Commit blocked — TRANSACTION_FAULT detected](docs/images/commit-blocked.svg)
+
+No commit is created, and the terminal already contains the patch.
+
+### Without the bug — the commit goes through
+
+One transaction now covers the debit, the order row and the gateway call, so a
+gateway failure rolls the debit back instead of stranding it:
+
+```python
+def process_order(db, payment_gateway, user_id, amount):
+    try:
+        with db.transaction():
+            rows = db.execute(
+                "UPDATE users SET balance = balance - %s "
+                "WHERE id = %s AND balance >= %s",
+                (amount, user_id, amount),
+            ).rowcount
+            if rows == 0:
+                raise InsufficientFunds(user_id)
+
+            payment_gateway.charge(user_id, amount)
+    except Exception:
+        db.rollback()
+        raise
+```
+
+![Commit passed — all semantic checks passed](docs/images/commit-passed.svg)
+
+Both files are in [`examples/`](examples/) and are byte-for-byte what produced
+the output above. The verbatim transcript — plus the two real bugs this testing
+caught in the tool itself — is in [`docs/DEMO.md`](docs/DEMO.md). The images are
+generated from that transcript by
+[`docs/render_demo_svg.py`](docs/render_demo_svg.py).
 
 ---
 
@@ -158,27 +199,91 @@ and refuses to overwrite a pre-commit hook it did not write.
 
 ---
 
-## Usage
+## Using it day to day
 
-Once installed there is nothing to run. Commit as normal:
+Once installed there is nothing to run and nothing to remember. You commit as
+you always have, and the hook decides whether to get involved.
 
 ```bash
 git add payment_service.py
 git commit -m "Add order payment flow"
 ```
 
-Bypass a verdict you disagree with:
+What happens next depends on what you staged:
+
+| What you staged | What the tool does | Cost | Commit |
+| --- | --- | --- | --- |
+| Nothing | Exits immediately | free | git's own "nothing to commit" |
+| Only docs, config, images, lockfiles | Tier 1 skips it, no API call | free | proceeds |
+| Code with no hazard found | Tier 2 audits, prints one green line | 1 call | proceeds |
+| Code with a `HIGH`/`CRITICAL` hazard | Tier 2 prints the banner and patch | 1 call | **refused** |
+| Anything, but the API is unreachable | Prints a warning | free | proceeds (fail open) |
+
+### When it blocks you
+
+Read the reason, then pick one:
 
 ```bash
-git commit --no-verify
+# 1. It is right. Apply the printed patch, re-stage, commit again.
+git add payment_service.py && git commit -m "Add order payment flow"
+
+# 2. It is wrong, or you are mid-spike and do not care yet.
+git commit --no-verify -m "WIP: spike, not production path"
 ```
 
-Run the audit manually, without committing:
+`--no-verify` is a supported answer, not a defeat. The tool is tuned to block
+rarely; if it blocks often on your codebase, that is a bug in the prompt, not
+a reason to fight the hook.
+
+### Checking before you commit
+
+Run the audit by hand against whatever is staged — useful mid-change, or to
+see what the hook *would* say:
 
 ```bash
 git add -A
+python sentinel.py; echo "exit=$?"     # 0 = would allow, 1 = would block
+```
+
+### Trying it without spending anything
+
+`SENTINEL_MOCK=1` returns a cached verdict with no network call, so you can
+learn the workflow, rehearse a demo, or work on a plane:
+
+```bash
+SENTINEL_MOCK=1 git commit -m "Add order payment flow"
+```
+
+### Rolling it out to a team
+
+The hook lives in `.git/hooks/`, which Git does not clone. Each developer runs
+`install.sh` once. To make that automatic, point the repo at a tracked hooks
+directory instead:
+
+```bash
+git config core.hooksPath hooks     # committed, so everyone gets it on clone
+```
+
+Two things worth agreeing on before you do:
+- Everyone needs `ANTHROPIC_API_KEY` set, or the hook silently fails open and
+  audits nothing.
+- It adds a few seconds to commits that touch code. Teams that commit in very
+  small increments feel this more than teams that don't.
+
+### Using it in CI instead of locally
+
+The engine is just a script with an exit code, so the same check works as a PR
+gate. Diff against the base branch rather than the index:
+
+```bash
+git diff origin/main...HEAD > /tmp/pr.diff
+# stage the PR's changes, then:
 python sentinel.py
 ```
+
+Note that in CI the fail-open behaviour is usually wrong — a missing key there
+means the gate silently passes everything. Assert the key is present before
+invoking it.
 
 ---
 
