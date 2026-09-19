@@ -353,7 +353,12 @@ valuable moments are invisible.
 python dashboard.py            # http://127.0.0.1:8765, opens your browser
 ```
 
-![SentinelCommit dashboard](docs/images/dashboard.png)
+![SentinelCommit dashboard populating live as commits are audited](docs/images/dashboard-demo.gif)
+
+*A real recording: three unsafe commits are refused, then the same three are
+remediated and pass. The counters, the hazard bars and the audit trail all
+update as it happens.* ([full-size still](docs/images/dashboard.png) ·
+[recorder](docs/record_dashboard_gif.py))
 
 One page, four sections:
 
