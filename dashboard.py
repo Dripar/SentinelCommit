@@ -20,11 +20,12 @@ import argparse
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SEP = "\x1f"  # unit separator - safe inside commit messages
 REC = "\x1e"  # record separator
@@ -61,20 +62,37 @@ def current_branch():
         return "(detached)"
 
 
+FILES_RE = re.compile(r"(\d+) files? changed")
+
+
 def load_commits(limit):
-    """Read the commit DAG. Returns newest-first."""
-    fmt = SEP.join(["%H", "%h", "%P", "%an", "%ae", "%aI", "%s", "%D"]) + REC
+    """
+    Read the commit DAG, newest-first, in a single git invocation.
+
+    `--shortstat` appends the diff summary after each record, which avoids one
+    `git show` per commit. That N+1 pattern cost ~11s for a handful of commits
+    on Windows, where spawning a process is expensive.
+
+    The format ends with a trailing SEP so the shortstat lands in its own field
+    rather than being glued onto the ref list.
+    """
+    fields = ["%H", "%h", "%P", "%an", "%ae", "%aI", "%s", "%D"]
+    fmt = REC + SEP.join(fields) + SEP
     try:
-        raw = git("log", "--all", "--date-order", "-n", str(limit), "--pretty=format:" + fmt)
+        raw = git("log", "--all", "--date-order", "-n", str(limit),
+                  "--shortstat", "--pretty=format:" + fmt)
     except RuntimeError:
         return []  # no commits yet
 
     commits = []
     for chunk in raw.split(REC):
-        chunk = chunk.strip("\n")
-        if not chunk:
+        if not chunk.strip():
             continue
-        sha, short, parents, an, ae, when, subject, refs = chunk.split(SEP)
+        parts = chunk.split(SEP)
+        if len(parts) < len(fields):
+            continue
+        sha, short, parents, an, ae, when, subject, refs = parts[:8]
+        stat = " ".join(parts[8].split()) if len(parts) > 8 else ""
         commits.append({
             "sha": sha,
             "short": short,
@@ -84,17 +102,10 @@ def load_commits(limit):
             "date": when,
             "subject": subject,
             "refs": [r.strip() for r in refs.split(",") if r.strip()],
+            # Merge commits produce no shortstat unless -m is passed; empty is correct.
+            "stat": stat,
+            "files": int(FILES_RE.search(stat).group(1)) if FILES_RE.search(stat) else 0,
         })
-
-    # Attach per-commit diff stats in one batch call rather than N calls.
-    for c in commits:
-        try:
-            out = git("show", "--stat=200", "--format=", c["sha"])
-            tail = [l for l in out.strip().splitlines() if l.strip()]
-            c["stat"] = tail[-1].strip() if tail else ""
-            c["files"] = max(len(tail) - 1, 0)
-        except Exception:
-            c["stat"], c["files"] = "", 0
     return commits
 
 
@@ -523,12 +534,23 @@ class Handler(BaseHTTPRequestHandler):
                        "application/json; charset=utf-8", status=500)
 
     def _send(self, body, ctype, status=200):
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            # The browser navigated away or the auto-refresh superseded this
+            # request. Routine, and not worth a stack trace in the terminal.
+            pass
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            self.close_connection = True
 
     def log_message(self, *args):
         pass  # keep the terminal clean
@@ -550,7 +572,12 @@ def main():
 
     Handler.limit = args.limit
     try:
-        server = HTTPServer((args.host, args.port), Handler)
+        # Threading matters here, not for load. A browser keeps an idle
+        # connection open, and a single-threaded server blocks inside
+        # handle_one_request() waiting on it - stalling every other request by
+        # ~10s. Leaving the page open is the intended use, so that is the
+        # normal case, not an edge case.
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
     except OSError as exc:
         print(f"error: cannot bind {args.host}:{args.port} ({exc})", file=sys.stderr)
         print("hint: pass --port to pick another.", file=sys.stderr)
