@@ -1,0 +1,56 @@
+#!/bin/sh
+# SentinelCommit - pre-commit execution wrapper.
+#
+# Resolves the repo root so the hook works from any subdirectory, finds a
+# Python interpreter that actually runs, and fails OPEN if it cannot: a broken
+# guardrail must never be the reason a commit is refused.
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+SENTINEL="$REPO_ROOT/sentinel.py"
+
+if [ ! -f "$SENTINEL" ]; then
+    echo "[SentinelCommit] sentinel.py not found - skipping audit."
+    exit 0
+fi
+
+# Probe each candidate rather than trusting `command -v`. On Windows, PATH
+# normally contains a Microsoft Store stub named python3.exe that exists, is
+# executable, prints "Python was not found" and exits non-zero. Trusting the
+# lookup hands that stub the commit decision and blocks every commit.
+usable() {
+    [ -n "$1" ] || return 1
+    "$1" -c "import sys; sys.exit(0)" >/dev/null 2>&1
+}
+
+PY=""
+for candidate in \
+    "$REPO_ROOT/venv/Scripts/python.exe" \
+    "$REPO_ROOT/venv/bin/python" \
+    "$REPO_ROOT/.venv/Scripts/python.exe" \
+    "$REPO_ROOT/.venv/bin/python" \
+    "$SENTINEL_PYTHON" \
+    py python3 python
+do
+    if usable "$candidate"; then
+        PY="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "[SentinelCommit] No working Python interpreter found - skipping audit."
+    echo "                 Set SENTINEL_PYTHON to an interpreter path to enable it."
+    exit 0
+fi
+
+SENTINEL_FORCE_COLOR=1 "$PY" "$SENTINEL"
+STATUS=$?
+
+# Exit 1 is the engine's deliberate "block". Anything else - a crash, a signal,
+# an interpreter failure - is our problem, not the developer's: fail open.
+if [ "$STATUS" -eq 0 ] || [ "$STATUS" -eq 1 ]; then
+    exit "$STATUS"
+fi
+
+echo "[SentinelCommit] Audit exited unexpectedly (status $STATUS) - commit allowed."
+exit 0
