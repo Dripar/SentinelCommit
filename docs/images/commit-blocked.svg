@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="652" height="771" viewBox="0 0 652 771" role="img" aria-label="SentinelCommit - commit blocked">
+<rect width="652" height="771" rx="8" fill="#0d1117"/>
+<rect width="652" height="26" rx="8" fill="#161b22"/>
+<rect y="18" width="652" height="8" fill="#161b22"/>
+<circle cx="16" cy="13" r="5" fill="#ff5f56"/>
+<circle cx="34" cy="13" r="5" fill="#ffbd2e"/>
+<circle cx="52" cy="13" r="5" fill="#27c93f"/>
+<text x="70" y="17" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" fill="#f85149">SentinelCommit - commit blocked</text>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+<text x="20.0" y="34" fill="#7ee787" textLength="16.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">$ </text>
+<text x="36.8" y="34" fill="#c9d1d9" textLength="487.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">cp examples/transaction_fault_unsafe.py payment_service.py</text>
+<text x="20.0" y="54" fill="#7ee787" textLength="16.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">$ </text>
+<text x="36.8" y="54" fill="#c9d1d9" textLength="218.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">git add payment_service.py</text>
+<text x="20.0" y="74" fill="#7ee787" textLength="16.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">$ </text>
+<text x="36.8" y="74" fill="#c9d1d9" textLength="361.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">git commit -m &quot;Add payment deduction logic&quot;</text>
+<text x="20.0" y="114" fill="#39c5cf" font-weight="bold" textLength="604.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">[SentinelCommit] Auditing 1 staged file(s) via Claude (claude-opus-5)...</text>
+<text x="20.0" y="154" fill="#f85149" font-weight="bold" textLength="571.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">====================================================================</text>
+<text x="20.0" y="174" fill="#f85149" font-weight="bold" textLength="571.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  [COMMIT REJECTED]   Hazard: TRANSACTION_FAULT   Severity: CRITICAL</text>
+<text x="20.0" y="194" fill="#f85149" font-weight="bold" textLength="571.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">====================================================================</text>
+<text x="20.0" y="234" fill="#8b949e" textLength="67.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  File: </text>
+<text x="87.2" y="234" fill="#39c5cf" font-weight="bold" textLength="151.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">payment_service.py</text>
+<text x="20.0" y="274" fill="#d29922" font-weight="bold" textLength="168.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  Why this is unsafe</text>
+<text x="20.0" y="294" fill="#c9d1d9" textLength="562.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    The balance is debited and committed before the payment gateway</text>
+<text x="20.0" y="314" fill="#c9d1d9" textLength="529.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    is called. If the gateway raises or times out, the debit is</text>
+<text x="20.0" y="334" fill="#c9d1d9" textLength="571.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    already durable and no compensating action runs, so the customer</text>
+<text x="20.0" y="354" fill="#c9d1d9" textLength="420.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    is debited for an order that was never placed.</text>
+<text x="20.0" y="394" fill="#3fb950" font-weight="bold" textLength="193.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  Suggested remediation</text>
+<text x="20.0" y="414" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="414" fill="#c9d1d9" textLength="33.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">try:</text>
+<text x="20.0" y="434" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="434" fill="#c9d1d9" textLength="218.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    with db.transaction():</text>
+<text x="20.0" y="454" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="454" fill="#c9d1d9" textLength="159.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">        db.execute(</text>
+<text x="20.0" y="474" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="474" fill="#c9d1d9" textLength="453.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">            &quot;UPDATE users SET balance = balance - %s &quot;</text>
+<text x="20.0" y="494" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="494" fill="#c9d1d9" textLength="386.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">            &quot;WHERE id = %s AND balance &gt;= %s&quot;,</text>
+<text x="20.0" y="514" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="514" fill="#c9d1d9" textLength="319.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">            (amount, user_id, amount),</text>
+<text x="20.0" y="534" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="534" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">        )</text>
+<text x="20.0" y="554" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="554" fill="#c9d1d9" textLength="394.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">        payment_gateway.charge(user_id, amount)</text>
+<text x="20.0" y="574" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="574" fill="#c9d1d9" textLength="168.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">except PaymentError:</text>
+<text x="20.0" y="594" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="594" fill="#c9d1d9" textLength="142.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    db.rollback()</text>
+<text x="20.0" y="614" fill="#8b949e" textLength="50.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    | </text>
+<text x="70.4" y="614" fill="#c9d1d9" textLength="75.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    raise</text>
+<text x="20.0" y="654" fill="#8b949e" textLength="487.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  Fix and re-stage, or bypass with: git commit --no-verify</text>
+<text x="20.0" y="674" fill="#f85149" font-weight="bold" textLength="571.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">====================================================================</text>
+<text x="20.0" y="714" fill="#7ee787" textLength="16.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">$ </text>
+<text x="36.8" y="714" fill="#c9d1d9" textLength="168.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">git log --oneline -1</text>
+<text x="20.0" y="734" fill="#c9d1d9" textLength="294.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">710d81e docs: touch examples readme</text>
+<text x="314.0" y="734" fill="#8b949e" textLength="226.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">   &lt;- no commit was created</text>
+</g></svg>

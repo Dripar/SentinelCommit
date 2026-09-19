@@ -1,0 +1,5 @@
+anthropic>=1.7.0
+
+# Optional: ANSI colour support on legacy Windows consoles (conhost).
+# Windows Terminal, Git Bash, macOS and Linux do not need this.
+colorama>=0.4.6; sys_platform == "win32"
