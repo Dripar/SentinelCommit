@@ -197,6 +197,30 @@ and refuses to overwrite a pre-commit hook it did not write.
 > which Git for Windows executes with its bundled shell, so it works from
 > PowerShell, CMD and GUI Git clients too.
 
+### Pin the interpreter
+
+The hook fails open when it cannot find a working Python — which means a
+misconfigured PATH silently stops auditing rather than announcing itself. On
+Windows this is easy to hit: `WindowsApps` usually precedes a real install on
+PATH, so `python3` resolves to a Microsoft Store stub that exits non-zero.
+
+Pin it once, per repository, and the hook stops depending on the environment:
+
+```bash
+git config sentinel.python "$(command -v python3)"     # macOS / Linux
+git config sentinel.python "$LOCALAPPDATA/Programs/Python/Python312/python.exe"
+```
+
+This is stored in `.git/config`, so it works from GUI clients, editors and
+scheduled jobs that do not inherit your shell. `SENTINEL_PYTHON` takes
+precedence if it is set; a `venv/` or `.venv/` at the repo root is used next.
+
+To confirm the hook is actually running rather than quietly skipping:
+
+```bash
+git add -A && python sentinel.py; echo "exit=$?"
+```
+
 ---
 
 ## Using it day to day
@@ -332,6 +356,7 @@ per-repository or in CI without editing code.
 | `ANTHROPIC_AUTH_TOKEN` | — | Accepted as an alternative to the API key (OAuth token). |
 | `SENTINEL_MOCK` | unset | `1` returns a cached verdict with no network call. For demos and offline work. |
 | `SENTINEL_PYTHON` | unset | Interpreter the hook should use. Set this if auto-detection picks the wrong Python. |
+| *(git config)* `sentinel.python` | unset | Repo-local interpreter pin, checked when `SENTINEL_PYTHON` is unset. Survives environments that do not inherit your shell. |
 | `SENTINEL_AUDIT_LOG` | `.git/sentinel-audit.jsonl` | Where verdicts are appended for the dashboard. Set to `off` to disable. |
 | `SENTINEL_MODEL` | `claude-opus-5` | Model id. |
 | `SENTINEL_EFFORT` | `medium` | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Higher catches more subtle defects, costs more latency. |

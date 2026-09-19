@@ -22,13 +22,23 @@ usable() {
     "$1" -c "import sys; sys.exit(0)" >/dev/null 2>&1
 }
 
+# A repo-local pin, for when the environment cannot be relied on. GUI clients,
+# editors and scheduled jobs do not always inherit a user's shell environment,
+# so an env var alone does not guarantee the hook runs. This lives in
+# .git/config and needs nothing exported:
+#     git config sentinel.python /path/to/python
+PY_CONFIG=$(git config --get sentinel.python 2>/dev/null)
+
+# Explicit configuration wins over discovery; discovery prefers a project venv
+# over whatever happens to be on PATH.
 PY=""
 for candidate in \
+    "$SENTINEL_PYTHON" \
+    "$PY_CONFIG" \
     "$REPO_ROOT/venv/Scripts/python.exe" \
     "$REPO_ROOT/venv/bin/python" \
     "$REPO_ROOT/.venv/Scripts/python.exe" \
     "$REPO_ROOT/.venv/bin/python" \
-    "$SENTINEL_PYTHON" \
     py python3 python
 do
     if usable "$candidate"; then
@@ -39,7 +49,8 @@ done
 
 if [ -z "$PY" ]; then
     echo "[SentinelCommit] No working Python interpreter found - skipping audit."
-    echo "                 Set SENTINEL_PYTHON to an interpreter path to enable it."
+    echo "                 Pin one so this never happens again:"
+    echo "                   git config sentinel.python \"\$(command -v python3)\""
     exit 0
 fi
 
