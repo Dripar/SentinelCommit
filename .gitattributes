@@ -1,0 +1,14 @@
+# Normalise text in the repository, let Git pick the working-copy ending.
+* text=auto
+
+# Shell scripts and Git hooks MUST keep LF endings. A hook checked out with
+# CRLF fails at exec time with "bad interpreter: /bin/sh^M", including under
+# Git for Windows and WSL.
+*.sh            text eol=lf
+hooks/pre-commit text eol=lf
+
+# Python stays LF for consistency across platforms.
+*.py            text eol=lf
+
+# Documentation.
+*.md            text

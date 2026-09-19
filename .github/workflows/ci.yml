@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Hook must fail open without credentials
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: |
+          # No key configured: the engine must allow the commit, not block it.
+          git config user.email ci@example.com
+          git config user.name CI
+          cp examples/transaction_fault_unsafe.py payment_service.py
+          git add payment_service.py
+          python sentinel.py
+          echo "exit=$? (0 required: fail open)"
+
+      - name: Mock verdict drives both demo scenarios
+        shell: bash
+        env:
+          SENTINEL_MOCK: "1"
+        run: |
+          git reset
+          cp examples/transaction_fault_unsafe.py payment_service.py
+          git add payment_service.py
+          if python sentinel.py; then
+            echo "::error::unsafe diff was not blocked"; exit 1
+          fi
+          git reset
+          cp examples/transaction_fault_safe.py payment_service.py
+          git add payment_service.py
+          python sentinel.py || { echo "::error::safe diff was blocked"; exit 1; }
