@@ -262,9 +262,6 @@ def render_graph(commits):
     return "".join(parts)
 
 
-REF_CLASS = {"HEAD": "ref-head", "tag": "ref-tag", "origin": "ref-remote"}
-
-
 def render_ref(ref):
     cls = "ref-branch"
     if ref.startswith("HEAD"):
