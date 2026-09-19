@@ -385,6 +385,13 @@ remediated and pass. The counters, the hazard bars and the audit trail all
 update as it happens.* ([full-size still](docs/images/dashboard.png) ·
 [recorder](docs/record_dashboard_gif.py))
 
+### Narrated walkthrough
+
+A 72-second video covering the problem, a refused commit, the fix, and the dashboard:
+
+**[▶ sentinel-demo.mp4](docs/images/sentinel-demo.mp4)** (1.5 MB, 1280×720, with narration) — regenerate with [`docs/record_demo_video.py`](docs/record_demo_video.py).
+
+
 One page, four sections:
 
 - **Stats** — commits, blocks, passes, Tier 1 skips (the free ones), API calls
