@@ -12,6 +12,7 @@ Exit codes:
   1  commit blocked (semantic hazard detected)
 """
 
+import datetime
 import json
 import os
 import subprocess
@@ -226,7 +227,73 @@ VERDICT_SCHEMA = {
     "additionalProperties": False,
 }
 
-MOCK_FIX = """try:
+# Keyword rules backing SENTINEL_MOCK. Each entry is:
+#   (hazard, severity, signals, remediations, reason, fix)
+# `signals` selects the rule; `remediations` clears it. Order matters - the
+# first rule whose signals appear wins, with TRANSACTION_FAULT as the default.
+#
+# This is a demo aid, not a detector. It exists so the offline path produces a
+# plausible verdict for each hazard class without a network call; the real
+# analysis is always the model.
+MOCK_RULES = [
+    (
+        "RACE_CONDITION", "HIGH",
+        ("global ", "seats_remaining", "_counter", "reserve_seat", "threading",
+         "sold out"),
+        ("nextval", "for update", "with lock", "lock()", "> 0"),
+        "The remaining count is read, checked, and only then written, so two "
+        "concurrent requests can both pass the check and both decrement - overselling "
+        "the event. The shared counter is also incremented without a lock, which is "
+        "not atomic in CPython and can hand two bookings the same reference.",
+        """with db.transaction():
+    claimed = db.execute(
+        "UPDATE events SET seats_remaining = seats_remaining - 1 "
+        "WHERE id = %s AND seats_remaining > 0",
+        (event_id,),
+    ).rowcount
+    if claimed == 0:
+        raise SoldOut(event_id)
+
+    reference = db.execute(
+        "SELECT nextval('booking_reference_seq')"
+    ).scalar()""",
+    ),
+    (
+        # `event_id` is deliberately NOT a signal here: it is a common parameter
+        # name in code that has nothing to do with webhook delivery, and it made
+        # the race-condition example match this rule instead of its own.
+        "IDEMPOTENCY_RISK", "HIGH",
+        ("webhook", "event[", "handle_payment", "amount_received",
+         "queue", "consumer"),
+        ("processed_events", "idempotency_key", "on conflict", "already processed",
+         "do nothing"),
+        "This handler applies its side effects unconditionally, but the provider "
+        "documents at-least-once delivery. A retry after a timeout replays the same "
+        "event, crediting the wallet and emailing the customer twice. There is no "
+        "de-duplication key or uniqueness constraint to make the replay a no-op.",
+        """with db.transaction():
+    claimed = db.execute(
+        "INSERT INTO processed_events (event_id, received_at) "
+        "VALUES (%s, NOW()) ON CONFLICT (event_id) DO NOTHING",
+        (event["id"],),
+    ).rowcount
+    if claimed == 0:
+        return  # already handled; this is a retry
+
+    db.execute(
+        "UPDATE wallets SET balance = balance + %s WHERE user_id = %s",
+        (amount, user_id),
+    )""",
+    ),
+    (
+        "TRANSACTION_FAULT", "CRITICAL",
+        (),  # empty signals = always matches, so this is the fallback
+        ("rollback", "db.transaction()", "with transaction"),
+        "The balance is debited and committed before the payment gateway is called. "
+        "If the gateway raises or times out, the debit is already durable and no "
+        "compensating action runs, so the customer is debited for an order that was "
+        "never placed.",
+        """try:
     with db.transaction():
         db.execute(
             "UPDATE users SET balance = balance - %s "
@@ -236,7 +303,19 @@ MOCK_FIX = """try:
         payment_gateway.charge(user_id, amount)
 except PaymentError:
     db.rollback()
-    raise"""
+    raise""",
+    ),
+]
+
+CLEAR_REASON = {
+    "IDEMPOTENCY_RISK": "The provider event id is claimed under a uniqueness "
+                        "constraint inside the same transaction as the side effects, "
+                        "so a replayed delivery is a no-op.",
+    "RACE_CONDITION": "The check and the act are a single atomic statement guarded by "
+                      "the database, and the counter is a transactional sequence.",
+    "TRANSACTION_FAULT": "Durable writes are wrapped in an explicit transaction with a "
+                         "rollback on the failure path. No unguarded side effects found.",
+}
 
 
 def _first_changed_path(diff_text):
@@ -255,32 +334,27 @@ def mock_verdict(diff_text):
         l for l in diff_text.splitlines()
         if l.startswith("+") and not l.startswith("+++")
     ).lower()
-    remediated = any(
-        marker in added
-        for marker in ("rollback", "idempotency_key", "for update", "with lock",
-                       "db.transaction()", "select ... for update")
-    )
-    if remediated:
+
+    for hazard, severity, signals, remediations, reason, fix in MOCK_RULES:
+        if signals and not any(s in added for s in signals):
+            continue
+        if any(r in added for r in remediations):
+            return {
+                "should_block": False,
+                "severity": "LOW",
+                "hazard_type": "NONE",
+                "file": "",
+                "reason": CLEAR_REASON[hazard],
+                "suggested_fix": "",
+            }
         return {
-            "should_block": False,
-            "severity": "LOW",
-            "hazard_type": "NONE",
-            "file": "",
-            "reason": "Durable writes are wrapped in an explicit transaction with a "
-                      "rollback on the failure path. No unguarded side effects found.",
-            "suggested_fix": "",
+            "should_block": True,
+            "severity": severity,
+            "hazard_type": hazard,
+            "file": _first_changed_path(diff_text),
+            "reason": reason,
+            "suggested_fix": fix,
         }
-    return {
-        "should_block": True,
-        "severity": "CRITICAL",
-        "hazard_type": "TRANSACTION_FAULT",
-        "file": _first_changed_path(diff_text),
-        "reason": "The balance is debited and committed before the payment gateway is "
-                  "called. If the gateway raises or times out, the debit is already "
-                  "durable and no compensating action runs, so the customer is debited "
-                  "for an order that was never placed.",
-        "suggested_fix": MOCK_FIX,
-    }
 
 
 def analyze_diff(diff_text):
@@ -362,8 +436,57 @@ def report_passed(v):
     print(green("[SentinelCommit] All semantic checks passed.") + detail)
 
 
-def allow(message):
+# --------------------------------------------------------------------------
+# Audit log - one JSON object per line, consumed by dashboard.py
+# --------------------------------------------------------------------------
+
+def audit_log_path():
+    """Resolve the audit log location, or None when logging is disabled."""
+    configured = os.environ.get("SENTINEL_AUDIT_LOG", "")
+    if configured.lower() == "off":
+        return None
+    if configured:
+        return configured
+    try:
+        git_dir = _git("rev-parse", "--absolute-git-dir").strip()
+    except Exception:
+        return None
+    return os.path.join(git_dir, "sentinel-audit.jsonl")
+
+
+def record(outcome, files=None, verdict=None, detail="", mock=False):
+    """Append one audit event. Never let logging break a commit."""
+    try:
+        path = audit_log_path()
+        if not path:
+            return
+        entry = {
+            "ts": datetime.datetime.now(datetime.timezone.utc)
+                          .replace(microsecond=0).isoformat(),
+            "outcome": outcome,
+            "files": files or [],
+            "detail": detail,
+            "mock": bool(mock),
+            "model": None if mock else MODEL,
+        }
+        if verdict:
+            entry.update({
+                "hazard_type": verdict.get("hazard_type"),
+                "severity": verdict.get("severity"),
+                "file": verdict.get("file"),
+                "reason": verdict.get("reason"),
+                "suggested_fix": verdict.get("suggested_fix"),
+            })
+        with open(path, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception:
+        # An unwritable log must never be the reason a commit fails.
+        pass
+
+
+def allow(message, files=None, detail=""):
     """Fail open: never hold a developer hostage to our own infrastructure."""
+    record("failed_open", files=files, detail=detail or message)
     print(yellow("[SentinelCommit] " + message + " - skipping audit, commit allowed."))
     sys.exit(0)
 
@@ -384,6 +507,8 @@ def main():
         sys.exit(0)
 
     if is_docs_only(files):
+        record("skipped_docs", files=files,
+               detail=str(len(files)) + " docs/config file(s), no API call")
         print(dim("[SentinelCommit] Docs/config only ("
                   + str(len(files)) + " file(s)) - no API call made."))
         sys.exit(0)
@@ -393,7 +518,7 @@ def main():
                      or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
 
     if not mock and not has_creds:
-        allow("ANTHROPIC_API_KEY not set")
+        allow("ANTHROPIC_API_KEY not set", files=files)
         return
 
     # --- Tier 2: semantic gate --------------------------------------------
@@ -404,13 +529,16 @@ def main():
     try:
         verdict = mock_verdict(diff) if mock else analyze_diff(diff)
     except Exception as exc:
-        allow("audit unavailable (" + type(exc).__name__ + ": " + str(exc) + ")")
+        allow("audit unavailable (" + type(exc).__name__ + ": " + str(exc) + ")",
+              files=files)
         return
 
     if verdict.get("should_block"):
+        record("blocked", files=files, verdict=verdict, mock=mock)
         report_blocked(verdict)
         sys.exit(1)
 
+    record("passed", files=files, verdict=verdict, mock=mock)
     report_passed(verdict)
     sys.exit(0)
 

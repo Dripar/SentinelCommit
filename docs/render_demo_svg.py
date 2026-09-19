@@ -97,7 +97,7 @@ def escape(text):
 
 def render(lines, title, accent):
     widest = max((sum(len(t) for t, _, _ in line) for line in lines if line), default=0)
-    width = int(widest * CHAR_W) + PAD_X * 2
+    width = int(widest * CHAR_W) + PAD_X * 2 + 8  # +8 so the last glyph never touches the edge
     height = len(lines) * LINE_H + PAD_Y + PAD_Y // 2
 
     out = [
@@ -119,12 +119,19 @@ def render(lines, title, accent):
         y = PAD_Y + row * LINE_H
         x = PAD_X
         for text, colour, bold in line:
+            if not text:
+                continue
             weight = ' font-weight="bold"' if bold else ""
+            run_w = len(text) * CHAR_W
+            # Pin every run to its computed width. Without textLength the
+            # layout depends on whichever monospace font the viewer resolves,
+            # and anything wider than CHAR_W overflows the viewBox and clips.
             out.append(
                 f'<text x="{x:.1f}" y="{y}" fill="{colour}"{weight} '
+                f'textLength="{run_w:.1f}" lengthAdjust="spacingAndGlyphs" '
                 f'xml:space="preserve">{escape(text)}</text>'
             )
-            x += len(text) * CHAR_W
+            x += run_w
 
     out.append("</g></svg>")
     return "\n".join(out) + "\n"

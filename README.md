@@ -329,13 +329,53 @@ per-repository or in CI without editing code.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | — | API credentials. Unset ⇒ the hook fails open. |
+| `ANTHROPIC_AUTH_TOKEN` | — | Accepted as an alternative to the API key (OAuth token). |
 | `SENTINEL_MOCK` | unset | `1` returns a cached verdict with no network call. For demos and offline work. |
+| `SENTINEL_PYTHON` | unset | Interpreter the hook should use. Set this if auto-detection picks the wrong Python. |
+| `SENTINEL_AUDIT_LOG` | `.git/sentinel-audit.jsonl` | Where verdicts are appended for the dashboard. Set to `off` to disable. |
 | `SENTINEL_MODEL` | `claude-opus-5` | Model id. |
 | `SENTINEL_EFFORT` | `medium` | `low` \| `medium` \| `high` \| `xhigh` \| `max`. Higher catches more subtle defects, costs more latency. |
 | `SENTINEL_TIMEOUT` | `45` | Per-request timeout, seconds. On timeout the hook fails open. |
 | `SENTINEL_MAX_DIFF` | `60000` | Diff characters sent before truncation. |
 | `SENTINEL_FORCE_COLOR` | unset | `1` forces ANSI colour when stdout is not a TTY. |
 | `NO_COLOR` | unset | Standard opt-out; disables all colour. |
+
+---
+
+## Dashboard
+
+Every verdict is appended to `.git/sentinel-audit.jsonl`, which gives you
+something a plain `git log` cannot: **the commits that never happened.** A
+blocked commit leaves no trace in git history, so without this the tool's most
+valuable moments are invisible.
+
+```bash
+python dashboard.py            # http://127.0.0.1:8765, opens your browser
+```
+
+![SentinelCommit dashboard](docs/images/dashboard.png)
+
+One page, four sections:
+
+- **Stats** — commits, blocks, passes, Tier 1 skips (the free ones), API calls
+  actually made, and how often it failed open.
+- **Hazards blocked** — which of the three classes are actually biting you.
+- **Commit graph** — the DAG in lanes, with branch, tag and remote refs.
+  Merges render as hollow nodes and lanes are colour-coded.
+- **Audit trail** — every verdict, newest first, with the hazard, severity,
+  files, the model's reasoning, and the suggested patch behind a disclosure.
+  Blocked entries are the ones with no corresponding commit.
+
+Standard library only — `http.server`, no Flask, no npm, no build step. Options:
+
+```bash
+python dashboard.py --port 9000 --limit 200 --no-browser
+curl -s localhost:8765/api/ | jq .stats      # same data as JSON
+```
+
+The page auto-refreshes every 10 seconds, so you can leave it open on a second
+monitor while you work. It binds to `127.0.0.1` and is read-only — it shells
+out to `git log` and reads the audit file, and has no write path.
 
 ---
 
@@ -381,9 +421,12 @@ interleavings is where the extra thinking budget pays for itself.
 
 ```
 sentinel.py             Core engine: diff extraction, both gates, reporting
+dashboard.py            Local single-page dashboard (stdlib http.server)
 hooks/pre-commit        POSIX sh wrapper; resolves repo root and interpreter
 install.sh              Idempotent hook installer
 examples/               Unsafe/safe pairs, one per hazard class
+tests/                  Unit tests for the deterministic gate and mock verdicts
+docs/                   Demo transcript, generated images, image generator
 requirements.txt        anthropic (+ colorama on Windows)
 ```
 
